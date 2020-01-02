@@ -49,20 +49,15 @@ func Dial(addr string) (io.ReadWriteCloser, error) {
 		return nil, err
 	}
 
-	reader := NewSecureReader(conn, clientPrivateKey, &serverKey)
-	writer := NewSecureWriter(conn, clientPrivateKey, &serverKey)
-
-	return &secureConnection{conn, reader, writer}, nil
-}
-
-type secureConnection struct {
-	c net.Conn
-	io.Reader
-	io.Writer
-}
-
-func (c secureConnection) Close() error {
-	return c.c.Close()
+	return &struct {
+		io.Reader
+		io.Writer
+		io.Closer
+	}{
+		NewSecureReader(conn, clientPrivateKey, &serverKey),
+		NewSecureWriter(conn, clientPrivateKey, &serverKey),
+		conn,
+	}, nil
 }
 
 // Serve starts a secure echo server on the given listener.
@@ -91,24 +86,15 @@ func Serve(l net.Listener) error {
 			return errors.New("Can not send public key")
 		}
 
-		sr := NewSecureReader(conn, privKey, &clientKey)
-		sw := NewSecureWriter(conn, privKey, &clientKey)
-		// Echo all incoming data.
-		io.Copy(sw, sr)
-		// Shut down the connection.
-		conn.Close()
-
-		// // Handle the connection in a new goroutine.
-		// // The loop then returns to accepting, so that
-		// // multiple connections may be served concurrently.
-		// go func(c net.Conn) {
-		// 	sr := NewSecureReader(c, privKey, &clientKey)
-		// 	sw := NewSecureWriter(c, privKey, pubKey)
-		// 	// Echo all incoming data.
-		// 	io.Copy(sw, sr)
-		// 	// Shut down the connection.
-		// 	c.Close()
-		// }(conn)
+		// Handle the connection in a new goroutine.
+		// The loop then returns to accepting, so that
+		// multiple connections may be served concurrently.
+		go func(c net.Conn) {
+			defer c.Close()
+			sr := NewSecureReader(c, privKey, &clientKey)
+			sw := NewSecureWriter(c, privKey, &clientKey)
+			io.Copy(sw, sr)
+		}(conn)
 	}
 }
 
